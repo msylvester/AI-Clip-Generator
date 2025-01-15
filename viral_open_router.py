@@ -7,6 +7,48 @@ import requests
 import json
 import os
 from moviepy import VideoFileClip
+import tiktoken
+
+
+'''
+
+(1)chunkking 
+(2)fine tune the prompting (across diff types of content --> were primarliy of focus)
+(3) 
+
+'''
+
+def count_tokens(text):
+    """
+    Count tokens in text using tiktoken encoder for GPT models.
+    While this won't be exact for DeepSeek, it provides a good approximation.
+    """
+    try:
+        # Initialize the encoder (using GPT-4 encoding as approximation)
+        encoder = tiktoken.encoding_for_model("gpt-4")
+        token_count = len(encoder.encode(text))
+        return token_count
+    except Exception as e:
+        print(f"Error counting tokens: {str(e)}")
+        return 0
+
+#DeepSeek V3 has 64k context
+#
+
+#bigger the context, the the worse teh performance (consider chunking)
+#use a tokenizer to see how many tokens will be processed
+
+
+#look for max context of the model on openrouter
+#64k
+
+
+#the OAI tokenizer has a web interface to see how many tokens are in your text, doesnt mean DeepSeek would have the same amount though. They are dividing words in different ways usually
+
+
+
+
+
 
 def test_pipeline(video_path, api_key, site_url, site_name, test_duration=30):
     """Test the analysis pipeline on first 30 seconds"""
@@ -123,9 +165,9 @@ def analyze_video_virality(video_path, api_key, site_url, site_name, segment_dur
         print(f"\nError during video analysis: {str(e)}")
         return []
 
-def analyze_virality_openrouter(text, api_key, site_url, site_name):
+def analyze_virality_openrouter(text, api_key, site_url, site_name, max_context_length=65536):  # 64k context window
     """
-    Analyze text virality using OpenRouter API
+    Analyze text virality using OpenRouter API with token count check
     """
     try:
         prompt = f"""
@@ -144,6 +186,23 @@ def analyze_virality_openrouter(text, api_key, site_url, site_name):
 
         Virality Score:
         """
+
+        # Check context length before making API call
+        # Using character count as a rough approximation since DeepSeek's exact tokenization differs
+        # Average of 4 characters per token as a conservative estimate
+        char_count = len(prompt)
+        estimated_tokens = char_count / 4
+        print(f"The number of tokens are {estimated_tokens} tokens")
+
+        if estimated_tokens > max_context_length:
+            print(f"Warning: Input may exceed context window (est. {estimated_tokens:.0f} tokens > {max_context_length})")
+            # Truncate text to roughly fit within context window
+            # This is a simple truncation - you might want to implement smarter chunking
+            ratio = max_context_length / estimated_tokens
+            truncated_length = int(len(text) * (ratio * 0.8))  # 0.8 as safety factor
+            text = text[:truncated_length] + "..."
+            prompt = prompt.replace(text, text[:truncated_length] + "...")
+            print(f"Text truncated to approximately {count_tokens(prompt)} tokens")
 
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
@@ -183,7 +242,7 @@ def format_timestamp(seconds):
     return f"{minutes:02d}:{seconds:02d}"
 
 if __name__ == "__main__":
-    video_path = "thirty_min_shark.mp4"
+    video_path = "two_min_joker.mp4"
     api_key = os.getenv("OPEN_ROUTER_KEY")
     if not api_key:
         raise ValueError("OPEN_ROUTER_KEY environment variable not found")
